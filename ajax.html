@@ -14,7 +14,7 @@
       background: #fff; 
     }
 
-    /* Fullscreen CSS Overlay */
+    /* Fullscreen CSS Overlay - Acts as visual fullscreen without triggering browser native mode */
     #iframe-overlay {
       position: fixed;
       top: 0;
@@ -81,6 +81,7 @@
 
   <!-- Fullscreen Fixed Overlay -->
   <div id="iframe-overlay">
+    <!-- Removed allowfullscreen to explicitly block native API -->
     <iframe id="frame" title="encrypted shop"></iframe>
   </div>
 
@@ -115,7 +116,13 @@
         
         if (!html) throw new Error("Decrypt failed — wrong key?");
 
-        // Inject ESC key tracking code inside iframe before rendering
+        // 1. Strip native requestFullscreen triggers from decrypted HTML
+        html = html.replace(/requestFullscreen/gi, 'voidFunc')
+                   .replace(/webkitRequestFullscreen/gi, 'voidFunc')
+                   .replace(/mozRequestFullScreen/gi, 'voidFunc')
+                   .replace(/msRequestFullscreen/gi, 'voidFunc');
+
+        // 2. Inject ESC key tracking script inside iframe
         const iframeScript = `
           <script>
             window.addEventListener('keydown', function(e) {
@@ -200,7 +207,7 @@
       }
     });
 
-    // Iframe Message Listener (captures Escape inside iframe)
+    // Message Listener for events inside iframe
     window.addEventListener("message", (event) => {
       if (event.data && event.data.type === 'ESC_KEYDOWN') {
         startEscHold();
